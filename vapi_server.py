@@ -2,35 +2,50 @@ import json
 import os
 import time
 from flask import Flask, jsonify, request
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain_groq import ChatGroq
 
 app = Flask(__name__)
 
-DOCS_DIR = "company_docs"  # اسم المجلد الظاهر في صورتك
+# متغيرات النظام
+DOCS_DIR = "company_docs"
 CHROMA_DIR = "chroma_db"
 
-print("🔄 جاري تهيئة محرك البحث والـ RAG...")
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-vector_db = Chroma(
-    persist_directory=CHROMA_DIR, embedding_function=embeddings
-)
+vector_db = None
+llm = None
 
-groq_key = os.getenv("GROQ_API_KEY")
-llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.2, api_key=groq_key)
+
+def get_rag():
+  """تحميل المحرك فقط عند الحاجة لسرعة إقلاع السيرفر على Render"""
+  global vector_db, llm
+  if vector_db is None:
+    print("🔄 جاري تحميل قاعدة المتجهات والنموذج لأول مرة...")
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_community.vectorstores import Chroma
+    from langchain_groq import ChatGroq
+
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
+    vector_db = Chroma(
+        persist_directory=CHROMA_DIR, embedding_function=embeddings
+    )
+
+    groq_key = os.getenv("GROQ_API_KEY")
+    llm = ChatGroq(
+        model="llama-3.1-8b-instant", temperature=0.2, api_key=groq_key
+    )
+  return vector_db, llm
 
 
 def query_rag(question):
   try:
-    docs = vector_db.similarity_search(question, k=4)
+    v_db, model = get_rag()
+    docs = v_db.similarity_search(question, k=4)
     context = (
         "\n\n".join([d.page_content for d in docs])
         if docs
         else "معلومات المقررات والوثائق المعتمدة."
     )
+
     prompt = f"""أنت مساعد صوتي ذكي ودقيق، تجيب باختصار وبشكل مباشر من واقع الملفات لتناسب المكالمة الصوتية:
 - لا تكرر السؤال في الإجابة، وابدأ بالشرح فوراً.
 - لا تعتذر ولا تقل لا أعلم.
@@ -40,10 +55,19 @@ def query_rag(question):
 
 السؤال: {question}
 الإجابة الصوتية المباشرة:"""
-    res = llm.invoke(prompt)
+
+    res = model.invoke(prompt)
     return res.content.strip()
   except Exception as e:
+    print(f"Error in RAG: {e}")
     return f"بخصوص استفسارك عن {question}، التفاصيل متوفرة وسأوضحها لك."
+
+
+# مسارات الفحص السريعة التي يستجيب لها Render في أجزاء من الثانية
+@app.route("/", methods=["GET"])
+@app.route("/ping", methods=["GET"])
+def health():
+  return "Vapi RAG Service is Live and Ready!", 200
 
 
 @app.route("/chat/completions", methods=["POST"])
@@ -76,12 +100,6 @@ def vapi_endpoint():
   })
 
 
-@app.route("/ping", methods=["GET"])
-@app.route("/", methods=["GET"])
-def ping():
-  return "Vapi RAG Service is Live!", 200
-
-
 if __name__ == "__main__":
-  port = int(os.environ.get("PORT", 5001))
+  port = int(os.environ.get("PORT", 10000))
   app.run(host="0.0.0.0", port=port)
