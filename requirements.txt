@@ -2,7 +2,9 @@ flask
 gunicorn
 langchain
 langchain-community
+langchain-core
+langchain-groq
+langchain-text-splitters
 chromadb
 pypdf
-langchain-groq
 sentence-transformers
