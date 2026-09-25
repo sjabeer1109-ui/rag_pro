@@ -1,0 +1,23 @@
+# استخدام نسخة خفيفة من بايثون
+FROM python:3.11-slim
+
+# تثبيت مكتبات النظام الضرورية لـ Poppler و PDF processing
+RUN apt-get update && apt-get install -y \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# تحديد مجلد العمل داخل الصندوق
+WORKDIR /app
+
+# نسخ ملف المتطلبات وتثبيتها
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# نسخ كود المشروع بالكامل
+COPY . .
+
+# فتح المنفذ الذي يعمل عليه ستريمليت
+EXPOSE 8501
+
+# الأمر الذي يشغل الواجهة
+CMD ["streamlit", "run", "web_interface.py"]
